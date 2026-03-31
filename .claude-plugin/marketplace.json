@@ -1,0 +1,21 @@
+{
+  "name": "agent-plugin",
+  "owner": {
+    "name": "geekerzhou"
+  },
+  "metadata": {
+    "description": "Personal Claude Code plugins (Cursor CLI agent, and more).",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "cursor",
+      "description": "Run Cursor CLI (agent) from Claude Code for headless tasks and background jobs.",
+      "version": "0.1.0",
+      "author": {
+        "name": "geekerzhou"
+      },
+      "source": "./plugins/cursor"
+    }
+  ]
+}
