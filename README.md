@@ -31,14 +31,20 @@ agent-plugin/
 ```bash
 /plugin marketplace add geekerzhou/agent-plugin
 /plugin install cursor@agent-plugin
+/plugin install gemini@agent-plugin
 /reload-plugins
 /cursor:setup
+/gemini:setup
 ```
 
-说明：`cursor` 插件依赖本机已安装 Cursor CLI（文档中的 `agent` 命令），详见插件内 `commands/setup.md`。
+说明：
+
+- **cursor**：依赖本机 Cursor CLI（`agent`），见插件内 `commands/setup.md`。
+- **gemini**：依赖本机 Gemini CLI（`gemini`，通常 `npm i -g @google/gemini-cli`），见 [官方文档](https://google-gemini.github.io/gemini-cli/docs/get-started/)。
 
 ## 当前插件
 
 | 插件 ID | 说明 |
 |--------|------|
-| `cursor` | 在 Claude Code 中调用 Cursor CLI 的 headless `agent -p` 流程，支持后台任务与 `status` / `result` / `cancel`。 |
+| `cursor` | 调用 Cursor CLI 的 headless `agent -p`，支持后台任务与 `status` / `result` / `cancel`。 |
+| `gemini` | 调用 Google Gemini CLI 的 headless `gemini -p`，`--write`/`--yolo` 映射为 `--yolo`；支持 `text`/`json` 输出与后台任务。 |
