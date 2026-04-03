@@ -20,7 +20,7 @@
     {
       "name": "gemini",
       "description": "Delegate tasks and code reviews to Google Gemini CLI from Claude Code with background jobs, adversarial review, rescue subagent, and stop-time review gate.",
-      "version": "0.2.0",
+      "version": "0.2.2",
       "author": {
         "name": "geekerzhou"
       },

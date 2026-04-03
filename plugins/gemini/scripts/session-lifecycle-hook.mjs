@@ -81,7 +81,7 @@ function handleSessionEnd(input) {
   cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
 }
 
-function main() {
+async function main() {
   const input = readHookInput();
   const eventName = process.argv[2] ?? input.hook_event_name ?? "";
 

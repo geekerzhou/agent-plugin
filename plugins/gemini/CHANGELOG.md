@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- 修复 session-lifecycle-hook 中 `main` 函数未定义为 `async` 导致的 `.catch` TypeError 问题
+
 ## 0.2.1
 
 - 增强 JSDoc 类型定义，提取顶层 `@typedef` 声明
