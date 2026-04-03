@@ -1,6 +1,6 @@
 {
   "name": "cursor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Run Cursor CLI (agent) from Claude Code to delegate tasks or automate headless runs.",
   "author": {
     "name": "geekerzhou"

@@ -1,3 +1,19 @@
+/**
+ * @typedef {{ available: boolean, detail: string }} AgentAvailability
+ * @typedef {{ available: boolean, authenticated: boolean, detail: string }} AgentAuthStatus
+ * @typedef {{ label: string, detail: string }} CursorRuntimeSummary
+ * @typedef {{ status: number, stdout: string, stderr: string }} AgentRunResult
+ * @typedef {{
+ *   cwd: string,
+ *   prompt: string,
+ *   force?: boolean,
+ *   model?: string | null,
+ *   outputFormat?: 'text' | 'json' | 'stream-json',
+ *   onProgress?: ((msg: string) => void) | null,
+ *   workspaceRoot?: string,
+ *   jobId?: string | null
+ * }} AgentPrintOptions
+ */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import process from "node:process";
@@ -23,11 +39,20 @@ export function resolveAgentBinary() {
   return override || "agent";
 }
 
+/**
+ * Check whether the Cursor CLI binary is available and report its version.
+ * @param {string} cwd
+ * @returns {AgentAvailability}
+ */
 export function getAgentAvailability(cwd) {
   const bin = resolveAgentBinary();
   return binaryAvailable(bin, ["--version"], { cwd });
 }
 
+/**
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {boolean}
+ */
 export function hasApiKeyInEnv(env = process.env) {
   return Boolean(String(env.CURSOR_API_KEY ?? "").trim());
 }
@@ -35,6 +60,7 @@ export function hasApiKeyInEnv(env = process.env) {
 /**
  * Uses `agent status` when available (see Cursor CLI auth docs).
  * @param {string} cwd
+ * @returns {AgentAuthStatus}
  */
 export function getAgentAuthStatus(cwd) {
   const availability = getAgentAvailability(cwd);
@@ -81,6 +107,11 @@ export function getAgentAuthStatus(cwd) {
   };
 }
 
+/**
+ * Summarise how the Cursor agent authenticates in the current environment.
+ * @param {Record<string, string | undefined>} [env]
+ * @returns {CursorRuntimeSummary}
+ */
 export function getCursorRuntimeSummary(env = process.env) {
   if (hasApiKeyInEnv(env)) {
     return {
@@ -112,16 +143,8 @@ function persistChildPid(workspaceRoot, jobId, pid) {
 
 /**
  * Run Cursor CLI in print (headless) mode.
- * @param {{
- *   cwd: string,
- *   prompt: string,
- *   force?: boolean,
- *   model?: string | null,
- *   outputFormat?: 'text' | 'json' | 'stream-json',
- *   onProgress?: ((msg: string) => void) | null,
- *   workspaceRoot?: string,
- *   jobId?: string | null
- * }} options
+ * @param {AgentPrintOptions} options
+ * @returns {Promise<AgentRunResult>}
  */
 export function runAgentPrint(options) {
   const {
