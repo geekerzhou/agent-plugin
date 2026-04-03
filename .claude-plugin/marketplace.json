@@ -4,14 +4,14 @@
     "name": "geekerzhou"
   },
   "metadata": {
-    "description": "Personal Claude Code plugins (Cursor CLI, Gemini CLI, and more).",
-    "version": "0.2.0"
+    "description": "Claude Code plugins for delegating tasks to Cursor CLI and Google Gemini CLI with code review, rescue subagents, and session lifecycle management.",
+    "version": "0.3.0"
   },
   "plugins": [
     {
       "name": "cursor",
-      "description": "Run Cursor CLI (agent) from Claude Code for headless tasks and background jobs.",
-      "version": "0.1.0",
+      "description": "Delegate tasks and code reviews to Cursor CLI (agent) from Claude Code with background jobs, adversarial review, rescue subagent, and stop-time review gate.",
+      "version": "0.2.0",
       "author": {
         "name": "geekerzhou"
       },
@@ -19,8 +19,8 @@
     },
     {
       "name": "gemini",
-      "description": "Run Google Gemini CLI from Claude Code (headless -p, jobs).",
-      "version": "0.1.0",
+      "description": "Delegate tasks and code reviews to Google Gemini CLI from Claude Code with background jobs, adversarial review, rescue subagent, and stop-time review gate.",
+      "version": "0.2.0",
       "author": {
         "name": "geekerzhou"
       },

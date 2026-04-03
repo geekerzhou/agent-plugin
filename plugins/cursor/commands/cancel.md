@@ -1,13 +1,8 @@
 ---
-description: Cancel a queued or running Cursor agent job
-argument-hint: '[job-id] [--json]'
+description: Cancel an active background Cursor job in this repository
+argument-hint: '[job-id]'
+disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-Run:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/cursor-companion.mjs" cancel --json $ARGUMENTS
-```
-
-Omit `--json` when the user asked for a short confirmation only.
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/cursor-companion.mjs" cancel $ARGUMENTS`

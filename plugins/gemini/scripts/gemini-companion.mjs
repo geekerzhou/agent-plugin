@@ -15,13 +15,24 @@ import {
   runGeminiPrint
 } from "./lib/gemini-cli.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
+import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
+import { loadPromptTemplate, interpolateTemplate } from "./lib/prompts.mjs";
+import {
+  generateJobId,
+  getConfig,
+  listJobs,
+  setConfig,
+  upsertJob,
+  writeJobFile
+} from "./lib/state.mjs";
 import {
   buildSingleJobSnapshot,
   buildStatusSnapshot,
   readStoredJob,
   resolveCancelableJob,
-  resolveResultJob
+  resolveResultJob,
+  sortJobsNewestFirst
 } from "./lib/job-control.mjs";
 import {
   appendLogLine,
@@ -30,21 +41,23 @@ import {
   createJobRecord,
   createProgressReporter,
   nowIso,
-  runTrackedJob
+  runTrackedJob,
+  SESSION_ID_ENV
 } from "./lib/tracked-jobs.mjs";
-import { generateJobId, upsertJob, writeJobFile } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import {
   renderCancelReport,
   renderJobStatusReport,
   renderQueuedTaskLaunch,
+  renderReviewResult,
   renderSetupReport,
   renderStatusReport,
   renderStoredJobResult,
   renderTaskResult
 } from "./lib/render.mjs";
 
-const ROOT_DIR = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
+const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const REVIEW_SCHEMA = path.join(ROOT_DIR, "schemas", "review-output.schema.json");
 const DEFAULT_STATUS_WAIT_TIMEOUT_MS = 240000;
 const DEFAULT_STATUS_POLL_INTERVAL_MS = 2000;
 
@@ -52,11 +65,14 @@ function printUsage() {
   console.log(
     [
       "Usage:",
-      "  node scripts/gemini-companion.mjs setup [--json]",
+      "  node scripts/gemini-companion.mjs setup [--enable-review-gate|--disable-review-gate] [--json]",
       "  node scripts/gemini-companion.mjs run [--background] [--write|--force|--yolo] [--model <id>] [--output-format text|json] [--prompt-file <path>] [prompt]",
+      "  node scripts/gemini-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
+      "  node scripts/gemini-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/gemini-companion.mjs status [job-id] [--all] [--json] [--wait] [--timeout-ms <n>] [--poll-interval-ms <n>]",
       "  node scripts/gemini-companion.mjs result [job-id] [--json]",
       "  node scripts/gemini-companion.mjs cancel [job-id] [--json]",
+      "  node scripts/gemini-companion.mjs task-resume-candidate [--json]",
       "",
       "Environment:",
       "  GEMINI_CLI_BIN       Override CLI binary (default: gemini)",
@@ -130,12 +146,28 @@ function shorten(text, limit = 96) {
   return `${normalized.slice(0, limit - 3)}...`;
 }
 
-function buildSetupReport(cwd) {
+function parseOutputFormat(value) {
+  if (value == null) {
+    return "text";
+  }
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized || normalized === "text") {
+    return "text";
+  }
+  if (normalized === "json") {
+    return "json";
+  }
+  throw new Error(`Unsupported --output-format "${value}". Use text or json.`);
+}
+
+function buildSetupReport(cwd, actionsTaken = []) {
+  const workspaceRoot = resolveWorkspaceRoot(cwd);
   const nodeStatus = binaryAvailable("node", ["--version"], { cwd });
   const bin = resolveGeminiBinary();
   const geminiStatus = getGeminiAvailability(cwd);
   const authStatus = getGeminiAuthStatus(cwd);
   const geminiRuntime = getGeminiRuntimeSummary();
+  const config = getConfig(workspaceRoot);
 
   const nextSteps = [];
   if (!geminiStatus.available) {
@@ -147,6 +179,9 @@ function buildSetupReport(cwd) {
       "Set GEMINI_API_KEY (AI Studio) or Vertex/ADC env vars — or run `gemini` once to log in with Google (cached for headless)."
     );
     nextSteps.push("https://google-gemini.github.io/gemini-cli/docs/get-started/authentication.html");
+  }
+  if (!config.stopReviewGate) {
+    nextSteps.push("Optional: run `/gemini:setup --enable-review-gate` to require a fresh review before stop.");
   }
 
   return {
@@ -161,6 +196,8 @@ function buildSetupReport(cwd) {
       authenticated: authStatus.authenticated
     },
     geminiRuntime,
+    reviewGateEnabled: Boolean(config.stopReviewGate),
+    actionsTaken,
     nextSteps
   };
 }
@@ -168,12 +205,27 @@ function buildSetupReport(cwd) {
 function handleSetup(argv) {
   const { options } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
-    booleanOptions: ["json"]
+    booleanOptions: ["json", "enable-review-gate", "disable-review-gate"]
   });
 
+  if (options["enable-review-gate"] && options["disable-review-gate"]) {
+    throw new Error("Choose either --enable-review-gate or --disable-review-gate.");
+  }
+
   const cwd = resolveCommandCwd(options);
-  const report = buildSetupReport(cwd);
-  outputResult(options.json ? report : renderSetupReport(report), options.json);
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const actionsTaken = [];
+
+  if (options["enable-review-gate"]) {
+    setConfig(workspaceRoot, "stopReviewGate", true);
+    actionsTaken.push(`Enabled the stop-time review gate for ${workspaceRoot}.`);
+  } else if (options["disable-review-gate"]) {
+    setConfig(workspaceRoot, "stopReviewGate", false);
+    actionsTaken.push(`Disabled the stop-time review gate for ${workspaceRoot}.`);
+  }
+
+  const finalReport = buildSetupReport(cwd, actionsTaken);
+  outputResult(options.json ? finalReport : renderSetupReport(finalReport), options.json);
 }
 
 function ensureGeminiBinary(cwd) {
@@ -185,18 +237,120 @@ function ensureGeminiBinary(cwd) {
   }
 }
 
-function parseOutputFormat(value) {
-  if (value == null) {
-    return "text";
+function readOutputSchema(schemaPath) {
+  return JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+}
+
+function parseStructuredOutput(rawText, meta = {}) {
+  const text = String(rawText ?? "").trim();
+  if (!text) {
+    return {
+      parsed: null,
+      rawOutput: text,
+      parseError: meta.failureMessage || "No final message from Gemini."
+    };
   }
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized || normalized === "text") {
-    return "text";
+
+  try {
+    const parsed = JSON.parse(text);
+    return { parsed, rawOutput: text, parseError: null };
+  } catch (error) {
+    const jsonMatch = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1].trim());
+        return { parsed, rawOutput: text, parseError: null };
+      } catch {
+        // fall through
+      }
+    }
+
+    return {
+      parsed: null,
+      rawOutput: text,
+      parseError: `Failed to parse JSON: ${error.message}`
+    };
   }
-  if (normalized === "json") {
-    return "json";
+}
+
+function buildAdversarialReviewPrompt(context, focusText) {
+  const template = loadPromptTemplate(ROOT_DIR, "adversarial-review");
+  return interpolateTemplate(template, {
+    REVIEW_KIND: "Adversarial Review",
+    TARGET_LABEL: context.target.label,
+    USER_FOCUS: focusText || "No extra focus provided.",
+    REVIEW_INPUT: context.content
+  });
+}
+
+async function executeReviewRun(request) {
+  ensureGeminiBinary(request.cwd);
+  ensureGitRepository(request.cwd);
+
+  const target = resolveReviewTarget(request.cwd, {
+    base: request.base,
+    scope: request.scope
+  });
+  const focusText = request.focusText?.trim() ?? "";
+  const reviewName = request.reviewName ?? "Review";
+
+  const context = collectReviewContext(request.cwd, target);
+  let prompt;
+
+  if (reviewName === "Adversarial Review") {
+    prompt = buildAdversarialReviewPrompt(context, focusText);
+  } else {
+    const template = loadPromptTemplate(ROOT_DIR, "review");
+    prompt = interpolateTemplate(template, {
+      TARGET_LABEL: context.target.label,
+      REVIEW_INPUT: context.content
+    });
   }
-  throw new Error(`Unsupported --output-format "${value}". Use text or json.`);
+
+  const outputSchema = readOutputSchema(REVIEW_SCHEMA);
+  const schemaInstruction = outputSchema
+    ? `\n\nReturn your response as valid JSON matching this schema:\n${JSON.stringify(outputSchema, null, 2)}`
+    : "";
+
+  const result = await runGeminiPrint({
+    cwd: context.repoRoot,
+    prompt: prompt + schemaInstruction,
+    yolo: false,
+    model: request.model,
+    outputFormat: "text",
+    onProgress: request.onProgress ?? null
+  });
+
+  const parsed = parseStructuredOutput(result.stdout, {
+    status: result.status,
+    failureMessage: result.stderr
+  });
+
+  const payload = {
+    review: reviewName,
+    target,
+    context: {
+      repoRoot: context.repoRoot,
+      branch: context.branch,
+      summary: context.summary
+    },
+    result: parsed.parsed,
+    rawOutput: parsed.rawOutput,
+    parseError: parsed.parseError
+  };
+
+  return {
+    exitStatus: result.status,
+    payload,
+    rendered: renderReviewResult(parsed, {
+      reviewLabel: reviewName,
+      targetLabel: context.target.label
+    }),
+    summary: parsed.parsed?.summary ?? parsed.parseError ?? firstMeaningfulLine(result.stdout, `${reviewName} finished.`),
+    jobTitle: `Gemini ${reviewName}`,
+    jobClass: "review",
+    targetLabel: context.target.label
+  };
 }
 
 async function executeGeminiRun(request) {
@@ -227,9 +381,7 @@ async function executeGeminiRun(request) {
   }
 
   const failureMessage = result.status !== 0 ? stderr || `gemini exited with code ${result.status}` : "";
-
-  const displayOutput =
-    rawOutput || (stderr && result.status === 0 ? stderr : "");
+  const displayOutput = rawOutput || (stderr && result.status === 0 ? stderr : "");
 
   return {
     exitStatus: result.status,
@@ -251,13 +403,20 @@ function createCompanionJob({ prefix, kind, title, workspaceRoot, jobClass, summ
   return createJobRecord({
     id: generateJobId(prefix),
     kind,
-    kindLabel: jobClass === "task" ? "task" : "job",
+    kindLabel: getJobKindLabel(kind, jobClass),
     title,
     workspaceRoot,
     jobClass,
     summary,
     write
   });
+}
+
+function getJobKindLabel(kind, jobClass) {
+  if (kind === "adversarial-review") {
+    return "adversarial-review";
+  }
+  return jobClass === "review" ? "review" : "rescue";
 }
 
 function createTrackedProgress(job, options = {}) {
@@ -295,7 +454,7 @@ async function runForegroundCommand(job, runner, options = {}) {
 }
 
 function spawnDetachedTaskWorker(cwd, jobId) {
-  const scriptPath = path.join(ROOT_DIR, "gemini-companion.mjs");
+  const scriptPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "gemini-companion.mjs");
   const child = spawn(process.execPath, [scriptPath, "task-worker", "--cwd", cwd, "--job-id", jobId], {
     cwd,
     env: process.env,
@@ -355,6 +514,60 @@ async function waitForSingleJobSnapshot(cwd, reference, options = {}) {
     waitTimedOut: isActiveJobStatus(snapshot.job.status),
     timeoutMs
   };
+}
+
+function buildReviewJobMetadata(reviewName, target) {
+  return {
+    kind: reviewName === "Adversarial Review" ? "adversarial-review" : "review",
+    title: reviewName === "Review" ? "Gemini Review" : `Gemini ${reviewName}`,
+    summary: `${reviewName} ${target.label}`
+  };
+}
+
+async function handleReviewCommand(argv, config) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["base", "scope", "model", "cwd"],
+    booleanOptions: ["json", "background", "wait"],
+    aliasMap: {
+      m: "model"
+    }
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const focusText = positionals.join(" ").trim();
+  const target = resolveReviewTarget(cwd, {
+    base: options.base,
+    scope: options.scope
+  });
+
+  const metadata = buildReviewJobMetadata(config.reviewName, target);
+  const job = createCompanionJob({
+    prefix: "review",
+    kind: metadata.kind,
+    title: metadata.title,
+    workspaceRoot,
+    jobClass: "review",
+    summary: metadata.summary
+  });
+  await runForegroundCommand(
+    job,
+    (progress) =>
+      executeReviewRun({
+        cwd,
+        base: options.base,
+        scope: options.scope,
+        model: options.model,
+        focusText,
+        reviewName: config.reviewName,
+        onProgress: progress
+      }),
+    { json: options.json }
+  );
+}
+
+async function handleReview(argv) {
+  return handleReviewCommand(argv, { reviewName: "Review" });
 }
 
 async function handleRun(argv) {
@@ -516,6 +729,47 @@ function handleResult(argv) {
   outputCommandResult(payload, renderStoredJobResult(job, storedJob), options.json);
 }
 
+function handleTaskResumeCandidate(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["cwd"],
+    booleanOptions: ["json"]
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const sessionId = process.env[SESSION_ID_ENV] ?? null;
+  const jobs = sortJobsNewestFirst(listJobs(workspaceRoot));
+  const candidate =
+    jobs.find(
+      (job) =>
+        job.jobClass === "task" &&
+        job.status !== "queued" &&
+        job.status !== "running" &&
+        (!sessionId || job.sessionId === sessionId)
+    ) ?? null;
+
+  const payload = {
+    available: Boolean(candidate),
+    sessionId,
+    candidate:
+      candidate == null
+        ? null
+        : {
+            id: candidate.id,
+            status: candidate.status,
+            title: candidate.title ?? null,
+            summary: candidate.summary ?? null,
+            completedAt: candidate.completedAt ?? null,
+            updatedAt: candidate.updatedAt ?? null
+          }
+  };
+
+  const rendered = candidate
+    ? `Resumable task found: ${candidate.id} (${candidate.status}).\n`
+    : "No resumable task found for this session.\n";
+  outputCommandResult(payload, rendered, options.json);
+}
+
 async function handleCancel(argv) {
   const { options, positionals } = parseCommandInput(argv, {
     valueOptions: ["cwd"],
@@ -588,6 +842,12 @@ async function main() {
     case "run":
       await handleRun(argv);
       break;
+    case "review":
+      await handleReview(argv);
+      break;
+    case "adversarial-review":
+      await handleReviewCommand(argv, { reviewName: "Adversarial Review" });
+      break;
     case "task-worker":
       await handleTaskWorker(argv);
       break;
@@ -596,6 +856,9 @@ async function main() {
       break;
     case "result":
       handleResult(argv);
+      break;
+    case "task-resume-candidate":
+      handleTaskResumeCandidate(argv);
       break;
     case "cancel":
       await handleCancel(argv);

@@ -7,7 +7,7 @@ allowed-tools: Bash(node:*)
 Run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" run --json $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" run --json "$ARGUMENTS"
 ```
 
 Notes:
@@ -19,5 +19,6 @@ Notes:
 
 Output rules:
 
-- Show the CLI result to the user.
+- Do not paraphrase, summarize, rewrite, or add commentary.
+- Show the CLI result to the user exactly as returned.
 - If `--background` was used, mention job id and `/gemini:status` / `/gemini:result`.

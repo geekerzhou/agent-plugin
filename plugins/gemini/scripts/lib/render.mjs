@@ -1,3 +1,86 @@
+function severityRank(severity) {
+  switch (severity) {
+    case "critical":
+      return 0;
+    case "high":
+      return 1;
+    case "medium":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function formatLineRange(finding) {
+  if (!finding.line_start) {
+    return "";
+  }
+  if (!finding.line_end || finding.line_end === finding.line_start) {
+    return `:${finding.line_start}`;
+  }
+  return `:${finding.line_start}-${finding.line_end}`;
+}
+
+function validateReviewResultShape(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return "Expected a top-level JSON object.";
+  }
+  if (typeof data.verdict !== "string" || !data.verdict.trim()) {
+    return "Missing string `verdict`.";
+  }
+  if (typeof data.summary !== "string" || !data.summary.trim()) {
+    return "Missing string `summary`.";
+  }
+  if (!Array.isArray(data.findings)) {
+    return "Missing array `findings`.";
+  }
+  if (!Array.isArray(data.next_steps)) {
+    return "Missing array `next_steps`.";
+  }
+  return null;
+}
+
+function normalizeReviewFinding(finding, index) {
+  const source = finding && typeof finding === "object" && !Array.isArray(finding) ? finding : {};
+  const lineStart = Number.isInteger(source.line_start) && source.line_start > 0 ? source.line_start : null;
+  const lineEnd =
+    Number.isInteger(source.line_end) && source.line_end > 0 && (!lineStart || source.line_end >= lineStart)
+      ? source.line_end
+      : lineStart;
+
+  return {
+    severity: typeof source.severity === "string" && source.severity.trim() ? source.severity.trim() : "low",
+    title: typeof source.title === "string" && source.title.trim() ? source.title.trim() : `Finding ${index + 1}`,
+    body: typeof source.body === "string" && source.body.trim() ? source.body.trim() : "No details provided.",
+    file: typeof source.file === "string" && source.file.trim() ? source.file.trim() : "unknown",
+    line_start: lineStart,
+    line_end: lineEnd,
+    recommendation: typeof source.recommendation === "string" ? source.recommendation.trim() : ""
+  };
+}
+
+function normalizeReviewResultData(data) {
+  return {
+    verdict: data.verdict.trim(),
+    summary: data.summary.trim(),
+    findings: data.findings.map((finding, index) => normalizeReviewFinding(finding, index)),
+    next_steps: data.next_steps
+      .filter((step) => typeof step === "string" && step.trim())
+      .map((step) => step.trim())
+  };
+}
+
+function isStructuredReviewStoredResult(storedJob) {
+  const result = storedJob?.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return false;
+  }
+  return (
+    Object.prototype.hasOwnProperty.call(result, "result") ||
+    Object.prototype.hasOwnProperty.call(result, "parseError")
+  );
+}
+
 function formatJobLine(job) {
   const parts = [job.id, `${job.status || "unknown"}`];
   if (job.kindLabel) {
@@ -18,15 +101,15 @@ function escapeMarkdownCell(value) {
 
 function appendActiveJobsTable(lines, jobs) {
   lines.push("Active jobs:");
-  lines.push("| Job | Kind | Status | Phase | Elapsed | Child PID | Summary | Actions |");
-  lines.push("| --- | --- | --- | --- | --- | --- | --- | --- |");
+  lines.push("| Job | Kind | Status | Phase | Elapsed | Summary | Actions |");
+  lines.push("| --- | --- | --- | --- | --- | --- | --- |");
   for (const job of jobs) {
     const actions = [`/gemini:status ${job.id}`];
     if (job.status === "queued" || job.status === "running") {
       actions.push(`/gemini:cancel ${job.id}`);
     }
     lines.push(
-      `| ${escapeMarkdownCell(job.id)} | ${escapeMarkdownCell(job.kindLabel)} | ${escapeMarkdownCell(job.status)} | ${escapeMarkdownCell(job.phase ?? "")} | ${escapeMarkdownCell(job.elapsed ?? "")} | ${escapeMarkdownCell(job.childPid ?? "")} | ${escapeMarkdownCell(job.summary ?? "")} | ${actions.map((action) => `\`${action}\``).join("<br>")} |`
+      `| ${escapeMarkdownCell(job.id)} | ${escapeMarkdownCell(job.kindLabel)} | ${escapeMarkdownCell(job.status)} | ${escapeMarkdownCell(job.phase ?? "")} | ${escapeMarkdownCell(job.elapsed ?? "")} | ${escapeMarkdownCell(job.summary ?? "")} | ${actions.map((action) => `\`${action}\``).join("<br>")} |`
     );
   }
 }
@@ -57,11 +140,26 @@ function pushJobDetails(lines, job, options = {}) {
   if (job.status !== "queued" && job.status !== "running" && options.showResultHint) {
     lines.push(`  Result: /gemini:result ${job.id}`);
   }
+  if (job.status !== "queued" && job.status !== "running" && job.jobClass === "task" && job.write && options.showReviewHint) {
+    lines.push("  Review changes: /gemini:review --wait");
+    lines.push("  Stricter review: /gemini:adversarial-review --wait");
+  }
   if (job.progressPreview?.length) {
     lines.push("  Progress:");
     for (const line of job.progressPreview) {
       lines.push(`    ${line}`);
     }
+  }
+}
+
+function appendReasoningSection(lines, reasoningSummary) {
+  if (!Array.isArray(reasoningSummary) || reasoningSummary.length === 0) {
+    return;
+  }
+
+  lines.push("", "Reasoning:");
+  for (const section of reasoningSummary) {
+    lines.push(`- ${section}`);
   }
 }
 
@@ -76,8 +174,17 @@ export function renderSetupReport(report) {
     `- gemini binary (${report.gemini.binary}): ${report.gemini.detail}`,
     `- auth (env detection): ${report.auth.authenticated ? "configured" : "not detected"} — ${report.auth.detail}`,
     `- runtime hint: ${report.geminiRuntime.label} — ${report.geminiRuntime.detail}`,
+    `- review gate: ${report.reviewGateEnabled ? "enabled" : "disabled"}`,
     ""
   ];
+
+  if (report.actionsTaken && report.actionsTaken.length > 0) {
+    lines.push("Actions taken:");
+    for (const action of report.actionsTaken) {
+      lines.push(`- ${action}`);
+    }
+    lines.push("");
+  }
 
   if (report.nextSteps.length > 0) {
     lines.push("Next steps:");
@@ -85,6 +192,83 @@ export function renderSetupReport(report) {
       lines.push(`- ${step}`);
     }
   }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+export function renderReviewResult(parsedResult, meta) {
+  if (!parsedResult.parsed) {
+    const lines = [
+      `# Gemini ${meta.reviewLabel}`,
+      "",
+      "Gemini did not return valid structured JSON.",
+      "",
+      `- Parse error: ${parsedResult.parseError}`
+    ];
+
+    if (parsedResult.rawOutput) {
+      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+    }
+
+    appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  const validationError = validateReviewResultShape(parsedResult.parsed);
+  if (validationError) {
+    const lines = [
+      `# Gemini ${meta.reviewLabel}`,
+      "",
+      `Target: ${meta.targetLabel}`,
+      "Gemini returned JSON with an unexpected review shape.",
+      "",
+      `- Validation error: ${validationError}`
+    ];
+
+    if (parsedResult.rawOutput) {
+      lines.push("", "Raw final message:", "", "```text", parsedResult.rawOutput, "```");
+    }
+
+    appendReasoningSection(lines, meta.reasoningSummary ?? parsedResult.reasoningSummary);
+
+    return `${lines.join("\n").trimEnd()}\n`;
+  }
+
+  const data = normalizeReviewResultData(parsedResult.parsed);
+  const findings = [...data.findings].sort((left, right) => severityRank(left.severity) - severityRank(right.severity));
+  const lines = [
+    `# Gemini ${meta.reviewLabel}`,
+    "",
+    `Target: ${meta.targetLabel}`,
+    `Verdict: ${data.verdict}`,
+    "",
+    data.summary,
+    ""
+  ];
+
+  if (findings.length === 0) {
+    lines.push("No material findings.");
+  } else {
+    lines.push("Findings:");
+    for (const finding of findings) {
+      const lineSuffix = formatLineRange(finding);
+      lines.push(`- [${finding.severity}] ${finding.title} (${finding.file}${lineSuffix})`);
+      lines.push(`  ${finding.body}`);
+      if (finding.recommendation) {
+        lines.push(`  Recommendation: ${finding.recommendation}`);
+      }
+    }
+  }
+
+  if (data.next_steps.length > 0) {
+    lines.push("", "Next steps:");
+    for (const step of data.next_steps) {
+      lines.push(`- ${step}`);
+    }
+  }
+
+  appendReasoningSection(lines, meta.reasoningSummary);
 
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -101,9 +285,10 @@ export function renderTaskResult(payload, meta) {
 
 export function renderStatusReport(report) {
   const lines = [
-    "# Gemini CLI Job Status",
+    "# Gemini CLI Status",
     "",
-    `Auth / runtime: ${report.geminiRuntime.label} — ${report.geminiRuntime.detail}`,
+    `Session runtime: ${report.sessionRuntime?.label ?? "unknown"}`,
+    `Review gate: ${report.config.stopReviewGate ? "enabled" : "disabled"}`,
     ""
   ];
 
@@ -142,6 +327,11 @@ export function renderStatusReport(report) {
     lines.push("No jobs recorded yet.", "");
   }
 
+  if (report.needsReview) {
+    lines.push("The stop-time review gate is enabled.");
+    lines.push("Ending the session will trigger a fresh Gemini adversarial review and block if it finds issues.");
+  }
+
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
@@ -152,12 +342,17 @@ export function renderJobStatusReport(job) {
     showDuration: job.status !== "queued" && job.status !== "running",
     showLog: true,
     showCancelHint: true,
-    showResultHint: true
+    showResultHint: true,
+    showReviewHint: true
   });
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
 export function renderStoredJobResult(job, storedJob) {
+  if (isStructuredReviewStoredResult(storedJob) && storedJob?.rendered) {
+    return storedJob.rendered.endsWith("\n") ? storedJob.rendered : `${storedJob.rendered}\n`;
+  }
+
   const rawOutput =
     (typeof storedJob?.result?.rawOutput === "string" && storedJob.result.rawOutput) ||
     (typeof storedJob?.result?.stdoutJson === "string" && storedJob.result.stdoutJson) ||

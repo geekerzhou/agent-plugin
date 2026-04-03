@@ -1,13 +1,15 @@
 ---
-description: Show the stored output for a finished Gemini CLI job
-argument-hint: '[job-id] [--json]'
+description: Show the stored final output for a finished Gemini job in this repository
+argument-hint: '[job-id]'
+disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-Run:
+!`node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" result $ARGUMENTS`
 
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/gemini-companion.mjs" result --json $ARGUMENTS
-```
-
-Omit `--json` when the user asked for raw output only.
+Present the full command output to the user. Do not summarize or condense it. Preserve all details including:
+- Job ID and status
+- The complete result payload, including verdict, summary, findings, details, artifacts, and next steps
+- File paths and line numbers exactly as reported
+- Any error messages or parse errors
+- Follow-up commands such as `/gemini:status <id>` and `/gemini:review`

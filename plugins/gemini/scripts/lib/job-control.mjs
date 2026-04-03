@@ -29,11 +29,20 @@ function getJobTypeLabel(job) {
   if (typeof job.kindLabel === "string" && job.kindLabel) {
     return job.kindLabel;
   }
+  if (job.kind === "adversarial-review") {
+    return "adversarial-review";
+  }
+  if (job.jobClass === "review") {
+    return "review";
+  }
   if (job.jobClass === "task") {
-    return "task";
+    return "rescue";
+  }
+  if (job.kind === "review") {
+    return "review";
   }
   if (job.kind === "task") {
-    return "task";
+    return "rescue";
   }
   return "job";
 }
@@ -43,7 +52,11 @@ function stripLogPrefix(line) {
 }
 
 function isProgressBlockTitle(line) {
-  return ["Final output"].includes(line);
+  return (
+    ["Final output", "Assistant message", "Reasoning summary", "Review output"].includes(line) ||
+    /^Subagent .+ message$/.test(line) ||
+    /^Subagent .+ reasoning summary$/.test(line)
+  );
 }
 
 export function readJobProgressPreview(logFile, maxLines = DEFAULT_MAX_PROGRESS_LINES) {
@@ -88,6 +101,12 @@ function formatElapsedDuration(startValue, endValue = null) {
   return `${seconds}s`;
 }
 
+function looksLikeVerificationCommand(line) {
+  return /\b(test|tests|lint|build|typecheck|type-check|check|verify|validate|pytest|jest|vitest|cargo test|npm test|pnpm test|yarn test|go test|mvn test|gradle test|tsc|eslint|ruff)\b/i.test(
+    line
+  );
+}
+
 function inferLegacyJobPhase(job, progressPreview = []) {
   switch (job.status) {
     case "queued":
@@ -104,12 +123,37 @@ function inferLegacyJobPhase(job, progressPreview = []) {
 
   for (let index = progressPreview.length - 1; index >= 0; index -= 1) {
     const line = progressPreview[index].toLowerCase();
-    if (line.includes("error") || line.includes("fatal")) {
+    if (line.startsWith("starting gemini") || line.startsWith("turn started")) {
+      return "starting";
+    }
+    if (line.startsWith("reviewer started") || line.includes("review mode")) {
+      return "reviewing";
+    }
+    if (line.startsWith("searching:") || line.startsWith("calling ") || line.startsWith("running tool:")) {
+      return "investigating";
+    }
+    if (line.startsWith("running command:")) {
+      return looksLikeVerificationCommand(line)
+        ? "verifying"
+        : job.jobClass === "review"
+          ? "reviewing"
+          : "investigating";
+    }
+    if (line.startsWith("command completed:")) {
+      return looksLikeVerificationCommand(line) ? "verifying" : "running";
+    }
+    if (line.startsWith("applying ") || line.startsWith("file changes ")) {
+      return "editing";
+    }
+    if (line.startsWith("turn completed")) {
+      return "finalizing";
+    }
+    if (line.startsWith("gemini error:") || line.startsWith("failed:")) {
       return "failed";
     }
   }
 
-  return job.jobClass === "task" ? "running" : "running";
+  return job.jobClass === "review" ? "reviewing" : "running";
 }
 
 export function enrichJob(job, options = {}) {
@@ -185,10 +229,11 @@ export function buildStatusSnapshot(cwd, options = {}) {
   return {
     workspaceRoot,
     config,
-    geminiRuntime: getGeminiRuntimeSummary(options.env),
+    sessionRuntime: getGeminiRuntimeSummary(options.env),
     running,
     latestFinished,
-    recent
+    recent,
+    needsReview: Boolean(config.stopReviewGate)
   };
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "gemini",
-  "version": "0.1.0",
-  "description": "Run Google Gemini CLI from Claude Code (headless -p, background jobs).",
+  "version": "0.2.0",
+  "description": "Run Google Gemini CLI from Claude Code — headless tasks, code review, adversarial review, background jobs, and stop-time review gate.",
   "author": {
     "name": "geekerzhou"
   }

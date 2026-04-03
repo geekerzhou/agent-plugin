@@ -7,7 +7,7 @@ allowed-tools: Bash(node:*)
 Run:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/cursor-companion.mjs" run --json $ARGUMENTS
+node "${CLAUDE_PLUGIN_ROOT}/scripts/cursor-companion.mjs" run --json "$ARGUMENTS"
 ```
 
 Notes:
@@ -20,3 +20,4 @@ Output rules:
 
 - Show the agent stdout result to the user.
 - Mention the job id when `--background` was used (`/cursor:status`, `/cursor:result`, `/cursor:cancel`).
+- Do not paraphrase, summarize, rewrite, or add commentary.

@@ -118,6 +118,10 @@ export function splitRawArgumentString(raw) {
     current += char;
   }
 
+  if (escaping) {
+    current += "\\";
+  }
+
   if (current.length > 0) {
     tokens.push(current);
   }
