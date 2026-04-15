@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- **Breaking:** Cursor rescue subagent id is now `cursor:rescue` (agent `name: rescue`). The former id `cursor:cursor-rescue` is removed; update rules and scripts that referenced it.
+
 ## 0.2.1
 
 - 增强 JSDoc 类型定义，提取顶层 `@typedef` 声明

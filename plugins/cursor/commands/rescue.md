@@ -5,7 +5,7 @@ context: fork
 allowed-tools: Bash(node:*)
 ---
 
-Route this request to the `cursor:cursor-rescue` subagent.
+Route this request to the `cursor:rescue` subagent.
 The final user-visible response must be the Cursor agent's output verbatim.
 
 Raw user request:
@@ -13,8 +13,8 @@ $ARGUMENTS
 
 Execution mode:
 
-- If the request includes `--background`, run the `cursor:cursor-rescue` subagent in the background.
-- If the request includes `--wait`, run the `cursor:cursor-rescue` subagent in the foreground.
+- If the request includes `--background`, run the `cursor:rescue` subagent in the background.
+- If the request includes `--wait`, run the `cursor:rescue` subagent in the foreground.
 - If neither flag is present, default to foreground.
 - `--background` and `--wait` are execution flags for Claude Code. Do not forward them to the run command, and do not treat them as part of the natural-language task text.
 - `--model` is a runtime-selection flag. Preserve it for the forwarded run call, but do not treat it as part of the natural-language task text.

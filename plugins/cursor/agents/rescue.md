@@ -1,5 +1,5 @@
 ---
-name: cursor-rescue
+name: rescue
 description: Proactively use when Claude Code is stuck, wants a second implementation or diagnosis pass, needs a deeper root-cause investigation, or should hand a substantial coding task to Cursor through the shared runtime
 tools: Bash
 skills:

@@ -6,7 +6,7 @@ user-invocable: false
 
 # Agent Prompting
 
-Use this skill when `cursor:cursor-rescue` needs to ask Cursor or another AI agent for help.
+Use this skill when `cursor:rescue` needs to ask Cursor or another AI agent for help.
 
 Prompt the agent like an operator, not a collaborator. Keep prompts compact and block-structured with XML tags. State the task, the output contract, the follow-through defaults, and the small set of extra constraints that matter.
 

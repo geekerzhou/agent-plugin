@@ -2,6 +2,8 @@
 
 个人 **Claude Code 插件市场** 仓库：在根目录用 `.claude-plugin/marketplace.json` 描述多个插件，每个插件放在 `plugins/<id>/` 下。
 
+另外，这个仓库现在也包含一个独立的 MCP 子包：`mcp/jenkins-release/`，用于通过 MCP 协议预览并触发 Jenkins 发布任务。
+
 ## 目录约定
 
 ```text
@@ -20,6 +22,20 @@ agent-plugin/
 │       ├── skills/         # 内部行为合约（非用户可调用）
 │       └── scripts/        # Node.js 脚本
 └── README.md
+```
+
+## MCP
+
+当前仓库额外提供：
+
+- `mcp/jenkins-release/`：一个独立的 Jenkins MCP Server，支持配置 Jenkins 地址/用户、预览任务、二次确认后触发任务，以及按上次参数重跑。
+
+本地运行：
+
+```bash
+cd mcp/jenkins-release
+npm install
+node server.mjs
 ```
 
 ## 功能概览

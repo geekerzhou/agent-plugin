@@ -1,0 +1,20 @@
+{
+  "name": "jenkins-release-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Jenkins release and rebuild workflows with confirmation-first preview tools.",
+  "type": "module",
+  "bin": {
+    "jenkins-release-mcp": "./server.mjs"
+  },
+  "files": [
+    "server.mjs",
+    "lib"
+  ],
+  "scripts": {
+    "start": "node ./server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.76"
+  }
+}
